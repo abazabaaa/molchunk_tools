@@ -1,0 +1,45 @@
+df2 = pd.read_csv('/data/dopamine_3_results/d3_glide_dockop/random_50k_smiles_try2.smi', header=None, delimiter=' ')
+df2.columns = ['smiles', 'Title']
+df2 = df2.set_index('Title')
+df2.index = df2.index + df2.groupby(level=0).cumcount().astype(str).replace('0','')
+df2 = df2.reset_index()
+df2.columns = ['names', 'smiles']
+df2
+df2.reset_index()
+
+import pyarrow.parquet as pq
+df = pq.read_pandas('/data/dopamine_3_results/d3_glide_dockop/first_random50k_glide/50k_glide_output_1.parquet').to_pandas()
+df.columns = ['names', 'docking_score']
+df = df.set_index('names')
+df.index = df.index + df.groupby(level=0).cumcount().astype(str).replace('0','')
+df = df.reset_index()
+df.columns = ['names', 'docking_score']
+df
+
+df = pd.concat([df.set_index('names'),df2.set_index('names')], axis=1, join='inner')
+
+smiles_column = "smiles"
+
+def _preprocess(i, row):
+    mol = dm.to_mol(row[smiles_column], ordered=True)
+    mol = dm.fix_mol(mol)
+    mol = dm.sanitize_mol(mol, sanifix=True, charge_neutral=False)
+    mol = dm.standardize_mol(mol, disconnect_metals=False, normalize=True, reionize=True, uncharge=False, stereo=True)
+
+    row["standard_smiles"] = dm.standardize_smiles(dm.to_smiles(mol))
+    row["selfies"] = dm.to_selfies(mol)
+    row["inchi"] = dm.to_inchi(mol)
+    row["inchikey"] = dm.to_inchikey(mol)
+    return row
+
+dm.disable_rdkit_log()
+data_clean = dm.parallelized(_preprocess, list(df.iterrows()), arg_type='args', progress=True)
+data_clean = pd.DataFrame(data_clean)
+data_clean.head()
+
+smiles = data_clean.sample(n=30, random_state=19)["standard_smiles", "smiles"].tolist()
+mols = [dm.to_mol(s) for s in smiles]
+dm.viz.to_image(mols, legends=smiles, mol_size=(400, 400))
+
+
+data_clean = data_clean.drop_duplicates(subset='standard_smiles', keep="first", inplace=False)
